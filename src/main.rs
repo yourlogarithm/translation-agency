@@ -1,22 +1,20 @@
+mod email;
+mod enums;
 mod models;
 mod routes;
 mod state;
-mod enums;
+mod auth;
 
 use std::{env, sync::Arc};
 
 use axum::{
     http::StatusCode,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
-use tokio_postgres::NoTls;
-use tracing::{info, error};
+use tracing::{error, info, Level};
 
-use crate::{
-    routes::v1::auth::create_user, 
-    state::AppState
-};
+use crate::{routes::v1::auth::create_user, state::{AppState, Env}};
 
 async fn root() -> StatusCode {
     StatusCode::OK
@@ -25,31 +23,53 @@ async fn root() -> StatusCode {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
-    tracing_subscriber::fmt::init();
 
-    let (client, connection) =
-        tokio_postgres::connect(&std::env::var("PG_URI").expect("PG_URI not set"), NoTls)
-            .await
-            .expect("Failed to connect to PostgresSQL");
+    let prod: bool = std::env::var("PROD").unwrap_or_default().parse().unwrap();
+    if prod {
+        tracing_subscriber::fmt::init();
+        info!("Starting in production mode...");
+    } else {
+        tracing_subscriber::fmt()
+            .with_max_level(Level::DEBUG)
+            .init();
+        info!("Starting in development mode...");
+    }
 
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!("Connection error: {}", e);
+    let pg_pool = match sqlx::postgres::PgPoolOptions::new()
+        .max_connections(10)
+        .connect(env!("DATABASE_URL"))
+        .await
+    {
+        Ok(pool) => pool,
+        Err(e) => {
+            error!("Couldn't connect to database {e}");
+            return;
         }
-    });
+    };
 
-    let state = Arc::new(AppState {
-        pg_client: client
+    let env = match Env::init() {
+        Ok(env) => env,
+        Err(e) => {
+            error!("Couldn't get environment variables {e}");
+            return;
+        }
+    };
+
+    let state = Arc::new(AppState { 
+        env,
+        pg_pool 
     });
 
     let app = Router::new().nest(
         "/",
         Router::new().route("/", get(root)).nest(
             "/api",
-            Router::new().nest(
-                "/v1",
-                Router::new().route("/user_creation", post(create_user)),
-            ).with_state(state),
+            Router::new()
+                .nest(
+                    "/v1",
+                    Router::new().route("/user_creation", post(create_user)),
+                )
+                .with_state(state),
         ),
     );
 

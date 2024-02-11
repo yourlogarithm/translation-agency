@@ -5,8 +5,7 @@ use regex::Regex;
 use tracing::{debug, error, info};
 
 use crate::{
-    models::{ApiResponse, CreateUser},
-    state::AppState,
+    email::VerifyEmailTemplate, models::{ApiResponse, CreateUser}, state::AppState
 };
 
 fn is_username_valid(username: &str) -> bool {
@@ -45,26 +44,26 @@ pub async fn create_user(
     if payload.usr.is_empty() || payload.usr.len() < 6 || payload.usr.len() > 30 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::failed(
-                "Username must be between 6 and 30 characters".to_owned(),
+            Json(ApiResponse::failed_str(
+                "Username must be between 6 and 30 characters",
             )),
         );
     }
 
     if !is_username_valid(&payload.usr) {
-        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed("Username must start with a letter and contain only letters, numbers, and the characters: ._-".to_owned())));
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Username must start with a letter and contain only letters, numbers, and the characters: ._-")));
     }
 
     debug!("Validating password");
     if payload.pwd.is_empty() || payload.pwd.len() < 8 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::failed("Password must be at least 8 characters".to_owned())),
+            Json(ApiResponse::failed_str("Password must be at least 8 characters")),
         );
     }
 
     if payload.pwd != payload.cpwd {
-        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed("Passwords do not match".to_owned())));
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Passwords do not match")));
     }
 
     debug!("Validating first and last name");
@@ -72,11 +71,11 @@ pub async fn create_user(
         if fname.len() < 2 || fname.len() > 255 {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(ApiResponse::failed("First name must be between 2 and 255 characters".to_owned())),
+                Json(ApiResponse::failed_str("First name must be between 2 and 255 characters")),
             );
         }
         if !is_name_valid(&fname) {
-            return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed("First name contains invalid characters".to_owned())));
+            return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("First name contains invalid characters")));
         }
     }
 
@@ -84,11 +83,11 @@ pub async fn create_user(
         if lname.len() < 2 || lname.len() > 255 {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(ApiResponse::failed("Last name must be between 2 and 255 characters".to_owned())),
+                Json(ApiResponse::failed_str("Last name must be between 2 and 255 characters")),
             );
         }
         if !is_name_valid(&lname) {
-            return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed("Last name contains invalid characters".to_owned())));
+            return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Last name contains invalid characters")));
         }
     }
 
@@ -96,41 +95,74 @@ pub async fn create_user(
     if payload.email.len() < 6 || payload.email.len() > 320 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::failed("Email must be between 6 and 320 characters".to_owned())),
+            Json(ApiResponse::failed_str("Email must be between 6 and 320 characters")),
         );
     }
 
     if !is_email_valid(&payload.email) {
-        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed("Invalid email".to_owned())));
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Invalid email")));
     }
+
+    if match state
+        .pg_pool
+        .query_one("SELECT EXISTS (SELECT 1 FROM clients WHERE email = $1)", &[&payload.email])
+        .await {
+        Ok(r) => r.get(0),
+        Err(e) => {
+            let msg = format!("Failed to check if email exists: {}", e);
+            error!(msg);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::failed_string(msg)));
+        }
+    } {
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Email already exists")));
+    }
+
+    if match state
+        .pg_pool
+        .query_one("SELECT EXISTS (SELECT 1 FROM clients WHERE usr = $1)", &[&payload.usr])
+        .await {
+        Ok(r) => r.get(0),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_string(format!("Failed to check if username exists: {}", e))));
+        }
+    } {
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse::failed_str("Username already exists")));
+    } 
 
     debug!("Hashing password");
     let hashed_password = match bcrypt::hash(payload.pwd, bcrypt::DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {
-            error!("Failed to hash password: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::failed(format!("Failed to hash password: {}", e))));
+            let msg = format!("Failed to hash password: {}", e);
+            error!(msg);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::failed_string(msg)));
         }
     };
 
-    debug!("Inserting user into database");
-    let result = match state
-        .pg_client
+    let uuid = uuid::Uuid::new_v4().to_string();
+    debug!("Inserting user into database - {}", uuid);
+    let idx: i32 = match state
+        .pg_pool
         .query_one(
-            "INSERT INTO clients (usr, pwd, fname, lname, email) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-            &[&payload.usr, &hashed_password, &payload.fname, &payload.lname, &payload.email],
+            "INSERT INTO clients (usr, pwd, fname, lname, email, vc) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            &[&payload.usr, &hashed_password, &payload.fname, &payload.lname, &payload.email, &uuid],
         )
         .await
     {
-        Ok(r) => r,
+        Ok(r) => r.get(0),
         Err(e) => {
-            error!("Failed to insert user into database: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::failed(format!("Failed to insert user into database: {}", e))));
+            let msg = format!("Failed to insert user into database: {}", e);
+            error!(msg);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse::failed_string(msg)));
         }
     };
+    debug!("Inserted user into database with id: {}", idx);
 
-    // TODO: Send verification email
+    let template = VerifyEmailTemplate {
+        app_name: "My App",
+        verify_link: &format!("http://localhost:8000/api/v1/verify_email?token={}", uuid),
+    };
 
-    (StatusCode::CREATED, Json(ApiResponse::successful(result.get(0))))
+    (StatusCode::CREATED, Json(ApiResponse::successful(idx)))
 }
  
