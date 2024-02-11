@@ -1,1 +1,1 @@
-mod create_usr;
+pub mod auth;
