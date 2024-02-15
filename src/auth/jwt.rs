@@ -43,19 +43,19 @@ pub async fn auth_middleware<'a>(
         .ok_or_else(|| {
             (
                 StatusCode::UNAUTHORIZED,
-                Json(ApiResponse::failed_str("Token not provided")),
+                Json(ApiResponse::failed("Token not provided")),
             )
         })?;
 
     let claims = jsonwebtoken::decode::<TokenClaims>(
         &token,
-        &DecodingKey::from_secret(state.env.jwt_secret.as_ref()),
+        &DecodingKey::from_secret(state.env.jwt_secret),
         &Validation::default(),
     )
     .map_err(|_| {
         (
             StatusCode::UNAUTHORIZED,
-            Json(ApiResponse::failed_str("Invalid token")),
+            Json(ApiResponse::failed("Invalid token")),
         )
     })?
     .claims;
@@ -63,7 +63,7 @@ pub async fn auth_middleware<'a>(
     let user_id = uuid::Uuid::parse_str(&claims.sub).map_err(|_| {
         (
             StatusCode::UNAUTHORIZED,
-            Json(ApiResponse::failed_str("Invalid token")),
+            Json(ApiResponse::failed("Invalid token")),
         )
     })?;
 
@@ -75,14 +75,14 @@ pub async fn auth_middleware<'a>(
             error!(msg);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::failed_string(msg)),
+                Json(ApiResponse::failed(msg)),
             )
         })?;
 
     let user = user.ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
-            Json(ApiResponse::failed_str(
+            Json(ApiResponse::failed(
                 "The user belonging to this token no longer exists",
             )),
         )

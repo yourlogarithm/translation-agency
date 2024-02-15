@@ -14,16 +14,12 @@ impl <T> ApiResponse<T> {
         }
     }
 
-    pub fn failed_str(message: &str) -> Self {
+    pub fn failed<S>(message: S) -> Self
+    where
+        S: ToString
+    {
         Self {
-            message: message.to_owned(),
-            data: None
-        }
-    }
-
-    pub fn failed_string(message: String) -> Self {
-        Self {
-            message,
+            message: message.to_string(),
             data: None
         }
     }

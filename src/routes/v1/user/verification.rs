@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use sqlx::{Executor, Row};
 use tracing::{error, info};
 
 use crate::{
@@ -21,14 +22,10 @@ pub async fn verify_user(
     info!("Verifying token {}", token);
     let username: String = match state
         .pg_pool
-        .query("UPDATE clients SET v = true WHERE vc = $1 RETURNING usr", &[&token])
+        .fetch_one(sqlx::query("UPDATE clients SET v = true WHERE vc = $1 RETURNING usr").bind(&token))
         .await {
-        Ok(rows) => {
-            if let Some(row) = rows.first() {
-                row.get(0)
-            } else {
-                return (StatusCode::NOT_FOUND, Json(ApiResponse::failed("Token not found")));
-            }
+        Ok(row) => {
+            row.get("username")
         },
         Err(e) => {
             error!("Error querying client: {:?}", e);
