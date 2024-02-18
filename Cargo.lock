@@ -2123,6 +2123,7 @@ dependencies = [
  "askama",
  "axum",
  "axum-extra",
+ "base64",
  "bcrypt",
  "chrono",
  "dotenv",

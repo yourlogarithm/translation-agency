@@ -28,22 +28,23 @@ async fn main() {
     let state = match AppState::init().await {
         Ok(state) => state,
         Err(e) => {
-            error!("Couldn't initialize application state {e}");
+            eprintln!("Couldn't initialize application state: {e}");
             return;
         }
     };
 
     let app = Router::new().nest(
         "/",
-        Router::new().route("/", get(root)).nest(
+        Router::new().nest(
             "/api",
             Router::new()
+                .route("/health", get(root))
                 .nest(
                     "/v1",
                     Router::new().nest(
                         "/user",
                         Router::new()
-                            .route("/creation", post(create_user))
+                            .route("/new", post(create_user))
                             .route("/verification", get(create_user)),
                     ),
                 )

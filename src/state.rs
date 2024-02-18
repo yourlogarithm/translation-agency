@@ -5,13 +5,13 @@ use std::{env, sync::Arc};
 
 pub struct Environment {
     pub prod: bool,
-    pub jwt_secret: &'static [u8],
+    pub jwt_secret: Vec<u8>,
 }
 
 impl Environment {
     pub fn init() -> Result<Self, Box<dyn std::error::Error>> {
         dotenv::dotenv().ok();
-        let jwt_secret = env::var("JWT_SECRET")?;
+        let jwt_secret = String::new().into_bytes();
         let prod = match env::var("APP_ENV") {
             Ok(env) => match env.as_str() {
                 "development" => false,
@@ -22,7 +22,7 @@ impl Environment {
         };
         Ok(Self {
             prod,
-            jwt_secret: jwt_secret.as_bytes(),
+            jwt_secret,
         })
     }
 }
@@ -34,7 +34,11 @@ pub struct AppState {
 
 impl AppState {
     pub async fn init() -> Result<Arc<Self>, Box<dyn std::error::Error>> {
-        let pg_pool = PgPool::connect(&env::var("DATABASE_URL")?).await?;
+        let database_url = match env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => return Err("DATABASE_URL is not set".into()),
+        };
+        let pg_pool = PgPool::connect(&database_url).await?;
         let env = Environment::init()?;
         tracing_subscriber::fmt()
             .with_max_level(if env.prod {

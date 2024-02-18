@@ -49,7 +49,7 @@ pub async fn auth_middleware<'a>(
 
     let claims = jsonwebtoken::decode::<TokenClaims>(
         &token,
-        &DecodingKey::from_secret(state.env.jwt_secret),
+        &DecodingKey::from_secret(&state.env.jwt_secret),
         &Validation::default(),
     )
     .map_err(|_| {

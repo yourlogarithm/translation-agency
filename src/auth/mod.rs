@@ -1,6 +1,6 @@
-mod claims;
+mod token;
 mod jwt;
 
 
-pub use claims::*;
+pub use token::*;
 pub use jwt::*;
